@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISL AI - Indian Sign Language Translator</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/framer-motion@11.11.17/dist/framer-motion.js"></script>
+    
+    <!-- MediaPipe -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    
+    <script>window.Motion = window.Motion || window.FramerMotion;</script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        heading: ['"Instrument Serif"', 'serif'],
+                        body: ['Barlow', 'sans-serif']
+                    },
+                    borderRadius: {
+                        DEFAULT: "9999px"
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { background: #000; margin: 0; overflow-x: hidden; }
+        
+        .liquid-glass {
+            background: rgba(255,255,255,0.01);
+            background-blend-mode: luminosity;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            border: none;
+            box-shadow: inset 0 1px 1px rgba(255,255,255,0.1);
+            position: relative;
+            overflow: hidden;
+        }
+        .liquid-glass::before {
+            content: "";
+            position: absolute; inset: 0;
+            border-radius: inherit;
+            padding: 1.4px;
+            background: linear-gradient(180deg,
+                rgba(255,255,255,0.45) 0%,
+                rgba(255,255,255,0.15) 20%,
+                rgba(255,255,255,0) 40%,
+                rgba(255,255,255,0) 60%,
+                rgba(255,255,255,0.15) 80%,
+                rgba(255,255,255,0.45) 100%);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            pointer-events: none;
+        }
+
+        .liquid-glass-strong {
+            background: rgba(255,255,255,0.01);
+            background-blend-mode: luminosity;
+            backdrop-filter: blur(50px);
+            -webkit-backdrop-filter: blur(50px);
+            border: none;
+            box-shadow: 4px 4px 4px rgba(0,0,0,0.05), inset 0 1px 1px rgba(255,255,255,0.15);
+            position: relative;
+            overflow: hidden;
+        }
+        .liquid-glass-strong::before {
+            content: "";
+            position: absolute; inset: 0;
+            border-radius: inherit;
+            padding: 1.4px;
+            background: linear-gradient(180deg,
+                rgba(255,255,255,0.5) 0%,
+                rgba(255,255,255,0.2) 20%,
+                rgba(255,255,255,0) 40%,
+                rgba(255,255,255,0) 60%,
+                rgba(255,255,255,0.2) 80%,
+                rgba(255,255,255,0.5) 100%);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            pointer-events: none;
+        }
+    </style>
+<base target="_blank">
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+        
+        const FM = window.Motion || window.FramerMotion || {};
+        const motion = FM.motion || new Proxy({}, { 
+            get: (target, prop) => (props) => React.createElement(prop, props) 
+        });
+        const useInView = FM.useInView || (() => true);
+        const AnimatePresence = FM.AnimatePresence || React.Fragment;
+
+        const originalError = console.error;
+        console.error = (...args) => {
+            if (/Warning.*did not match/.test(args[0])) return;
+            if (/Warning.*validateDOMNesting/.test(args[0])) return;
+            originalError.apply(console, args);
+        };
+
+        // --- Icons ---
+        const ArrowUpRight = ({ className }) => (
+            <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M7 17L17 7" /><path d="M7 7h10v10" />
+            </svg>
+        );
+        const PlayIcon = ({ className }) => (
+            <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="6 4 20 12 6 20 6 4" />
+            </svg>
+        );
+        const CloseIcon = ({ className }) => (
+            <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 6L6 18" /><path d="M6 6l12 12" />
+            </svg>
+        );
+        const ImageIcon = () => (
+            <svg className="h-6 w-6 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h14q.825 0 1.413.588T21 5v14q0 .825-.587 1.413T19 21H5Zm1-4h12l-3.75-5-3 4L9 13l-3 4Z" /></svg>
+        );
+        const MovieIcon = () => (
+            <svg className="h-6 w-6 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6.47 5.76 10H20v8H4V6.47M22 4h-4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.89-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4Z" /></svg>
+        );
+        const LightbulbIcon = () => (
+            <svg className="h-6 w-6 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1Zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7Z" /></svg>
+        );
+        const GoogleIcon = () => (
+            <svg className="h-5 w-5" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+            </svg>
+        );
+        const MailIcon = () => (
+            <svg className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                <polyline points="22,6 12,13 2,6" />
+            </svg>
+        );
+        const PhoneIcon = () => (
+            <svg className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+            </svg>
+        );
+        const HandIcon = ({ className }) => (
+            <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0" />
+                <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" />
+                <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" />
+                <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+            </svg>
+        );
+        const LogoutIcon = ({ className }) => (
+            <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+        );
+        const CameraIcon = ({ className }) => (
+            <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
+            </svg>
+        );
+        const VolumeIcon = ({ className }) => (
+            <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+            </svg>
+        );
+        const TrashIcon = ({ className }) => (
+            <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+        );
+
+        // --- FadingVideo ---
+        const FadingVideo = ({ src, className, style }) => {
+            const videoRef = useRef(null);
+            const rAFId = useRef(null);
+            const fadingOutRef = useRef(false);
+            const FADE_MS = 500;
+            const FADE_OUT_LEAD = 0.55;
+
+            const fadeTo = (target, duration) => {
+                if (rAFId.current) cancelAnimationFrame(rAFId.current);
+                const video = videoRef.current;
+                if (!video) return;
+                const startOpacity = parseFloat(video.style.opacity || '0');
+                const startTime = performance.now();
+                const animateFade = (now) => {
+                    const elapsed = now - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    const newOpacity = startOpacity + (target - startOpacity) * progress;
+                    video.style.opacity = newOpacity.toFixed(4);
+                    if (progress < 1) rAFId.current = requestAnimationFrame(animateFade);
+                    else rAFId.current = null;
+                };
+                rAFId.current = requestAnimationFrame(animateFade);
+            };
+
+            useEffect(() => {
+                const video = videoRef.current;
+                if (!video) return;
+                const handleLoadedData = () => {
+                    video.style.opacity = '0';
+                    video.play().then(() => fadeTo(1, FADE_MS)).catch(e => console.error("Autoplay blocked", e));
+                };
+                const handleTimeUpdate = () => {
+                    if (!fadingOutRef.current && video.duration && (video.duration - video.currentTime <= FADE_OUT_LEAD) && (video.duration - video.currentTime > 0)) {
+                        fadingOutRef.current = true;
+                        fadeTo(0, FADE_MS);
+                    }
+                };
+                const handleEnded = () => {
+                    video.style.opacity = '0';
+                    setTimeout(() => {
+                        video.currentTime = 0;
+                        video.play();
+                        fadingOutRef.current = false;
+                        fadeTo(1, FADE_MS);
+                    }, 100);
+                };
+                video.addEventListener('loadeddata', handleLoadedData);
+                video.addEventListener('timeupdate', handleTimeUpdate);
+                video.addEventListener('ended', handleEnded);
+                return () => {
+                    if (rAFId.current) cancelAnimationFrame(rAFId.current);
+                    video.removeEventListener('loadeddata', handleLoadedData);
+                    video.removeEventListener('timeupdate', handleTimeUpdate);
+                    video.removeEventListener('ended', handleEnded);
+                };
+            }, []);
+
+            return <video ref={videoRef} src={src} autoPlay muted playsInline preload="auto" className={className} style={{ opacity: 0, ...style }} />;
+        };
+
+        // --- BlurText ---
+        const BlurText = ({ text, className }) => {
+            const ref = useRef(null);
+            const inView = useInView(ref, { amount: 0.1 });
+            const words = text.split(' ');
+            return (
+                <p ref={ref} className={className} style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', rowGap: '0.1em' }}>
+                    {words.map((word, i) => (
+                        <motion.span key={`${word}-${i}`} style={{ display: 'inline-block', marginRight: '0.28em' }}
+                            initial={{ filter: 'blur(10px)', opacity: 0, y: 50 }}
+                            animate={inView ? { filter: ['blur(10px)', 'blur(5px)', 'blur(0px)'], opacity: [0, 0.5, 1], y: [50, -5, 0] } : {}}
+                            transition={{ duration: 0.7, times: [0, 0.5, 1], ease: 'easeOut', delay: (i * 100) / 1000 }}>
+                            {word}
+                        </motion.span>
+                    ))}
+                </p>
+            );
+        };
+
+        // --- ISL Gesture Recognition ---
+        const recognizeISLGesture = (landmarks) => {
+            const wrist = landmarks[0];
+            const thumbTip = landmarks[4], thumbIP = landmarks[3], thumbMCP = landmarks[2];
+            const indexTip = landmarks[8], indexPIP = landmarks[6], indexMCP = landmarks[5];
+            const middleTip = landmarks[12], middlePIP = landmarks[10], middleMCP = landmarks[9];
+            const ringTip = landmarks[16], ringPIP = landmarks[14], ringMCP = landmarks[13];
+            const pinkyTip = landmarks[20], pinkyPIP = landmarks[18], pinkyMCP = landmarks[17];
+
+            const dist = (a, b) => Math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2);
+            
+            const isExtended = (tip, pip, mcp) => {
+                const tipFar = dist(tip, wrist) > dist(mcp, wrist) * 1.2;
+                const tipUp = tip.y < pip.y;
+                return tipUp && tipFar;
+            };
+
+            const indexExt = isExtended(indexTip, indexPIP, indexMCP);
+            const middleExt = isExtended(middleTip, middlePIP, middleMCP);
+            const ringExt = isExtended(ringTip, ringPIP, ringMCP);
+            const pinkyExt = isExtended(pinkyTip, pinkyPIP, pinkyMCP);
+            const thumbExt = dist(thumbTip, indexMCP) > dist(thumbMCP, indexMCP) * 1.1;
+
+            if (!thumbExt && !indexExt && !middleExt && !ringExt && !pinkyExt) return 'A';
+            if (!thumbExt && indexExt && middleExt && ringExt && pinkyExt) return 'B';
+            if (thumbExt && !indexExt && !middleExt && !ringExt && !pinkyExt) return 'C';
+            if (!thumbExt && indexExt && !middleExt && !ringExt && !pinkyExt) return 'D';
+            if (thumbExt && !indexExt && !middleExt && !ringExt && !pinkyExt) return 'E';
+            if (thumbExt && indexExt && middleExt && ringExt && pinkyExt) return 'F';
+            if (thumbExt && indexExt && !middleExt && !ringExt && !pinkyExt) return 'G';
+            if (!thumbExt && indexExt && middleExt && !ringExt && !pinkyExt) return 'H';
+            if (!thumbExt && !indexExt && !middleExt && !ringExt && pinkyExt) return 'I';
+            if (!thumbExt && !indexExt && !middleExt && !ringExt && pinkyExt) return 'J';
+            if (thumbExt && indexExt && middleExt && !ringExt && !pinkyExt) return 'K';
+            if (thumbExt && indexExt && !middleExt && !ringExt && !pinkyExt) return 'L';
+            if (!thumbExt && !indexExt && !middleExt && !ringExt && !pinkyExt) return 'M';
+            if (!thumbExt && !indexExt && !middleExt && !ringExt && !pinkyExt) return 'N';
+            if (thumbExt && !indexExt && !middleExt && !ringExt && !pinkyExt) return 'O';
+            if (thumbExt && indexExt && !middleExt && !ringExt && !pinkyExt) return 'P';
+            if (thumbExt && !indexExt && !middleExt && !ringExt && !pinkyExt) return 'Q';
+            if (!thumbExt && indexExt && middleExt && !ringExt && !pinkyExt) return 'R';
+            if (!thumbExt && !indexExt && !middleExt && !ringExt && !pinkyExt) return 'S';
+            if (thumbExt && !indexExt && !middleExt && !ringExt && !pinkyExt) return 'T';
+            if (!thumbExt && indexExt && middleExt && !ringExt && !pinkyExt) return 'U';
+            if (!thumbExt && indexExt && middleExt && !ringExt && !pinkyExt) return 'V';
+            if (!thumbExt && indexExt && middleExt && ringExt && !pinkyExt) return 'W';
+            if (!thumbExt && indexExt && !middleExt && !ringExt && !pinkyExt) return 'X';
+            if (thumbExt && !indexExt && !middleExt && !ringExt && pinkyExt) return 'Y';
+            if (!thumbExt && indexExt && !middleExt && !ringExt && !pinkyExt) return 'Z';
+
+            return '?';
+        };
+
+        // --- Custom Drawing Functions (exactly like the image) ---
+        const drawHandSkeleton = (ctx, landmarks, width, height) => {
+            // Define connections exactly like MediaPipe HANDS_CONNECTIONS
+            const connections = [
+                [0,1],[1,2],[2,3],[3,4],           // Thumb
+                [0,5],[5,6],[6,7],[7,8],           // Index
+                [0,9],[9,10],[10,11],[11,12],      // Middle
+                [0,13],[13,14],[14,15],[15,16],    // Ring
+                [0,17],[17,18],[18,19],[19,20],    // Pinky
+                [5,9],[9,13],[13,17]               // Palm
+            ];
+
+            // Draw WHITE lines first (behind dots)
+            ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+            
+            for (const [start, end] of connections) {
+                const startX = landmarks[start].x * width;
+                const startY = landmarks[start].y * height;
+                const endX = landmarks[end].x * width;
+                const endY = landmarks[end].y * height;
+                
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(endX, endY);
+                ctx.stroke();
+            }
+
+            // Draw MAGENTA/PINK dots on ALL 21 landmarks
+            for (let i = 0; i < landmarks.length; i++) {
+                const x = landmarks[i].x * width;
+                const y = landmarks[i].y * height;
+                
+                // White outer ring
+                ctx.beginPath();
+                ctx.arc(x, y, 5, 0, 2 * Math.PI);
+                ctx.fillStyle = 'rgba(255,255,255,0.8)';
+                ctx.fill();
+                
+                // Magenta/pink center
+                ctx.beginPath();
+                ctx.arc(x, y, 3.5, 0, 2 * Math.PI);
+                ctx.fillStyle = '#FF1493';
+                ctx.fill();
+            }
+        };
+
+        // --- ISL Dashboard ---
+        const ISLDashboard = ({ onLogout }) => {
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
+            const [isDetecting, setIsDetecting] = useState(false);
+            const [detectedText, setDetectedText] = useState('');
+            const [handCount, setHandCount] = useState(0);
+            const [confidence, setConfidence] = useState(0);
+            const [currentGesture, setCurrentGesture] = useState('');
+            const handsRef = useRef(null);
+            const cameraRef = useRef(null);
+            const textBufferRef = useRef([]);
+            const lastGestureRef = useRef('');
+            const gestureCountRef = useRef(0);
+            const gestureHoldRef = useRef(0);
+
+            useEffect(() => {
+                const hands = new window.Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+                });
+
+                hands.setOptions({
+                    maxNumHands: 2,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+
+                hands.onResults((results) => {
+                    const canvas = canvasRef.current;
+                    const video = videoRef.current;
+                    if (!canvas || !video) return;
+
+                    const ctx = canvas.getContext('2d');
+                    const w = video.videoWidth || 640;
+                    const h = video.videoHeight || 480;
+                    canvas.width = w;
+                    canvas.height = h;
+
+                    ctx.save();
+                    ctx.clearRect(0, 0, w, h);
+                    
+                    // Mirror the entire canvas context so right hand appears on right
+                    ctx.translate(w, 0);
+                    ctx.scale(-1, 1);
+                    
+                    // Draw raw video (mirrored)
+                    ctx.drawImage(results.image, 0, 0, w, h);
+
+                    let currentHands = 0;
+                    let bestGesture = '';
+
+                    if (results.multiHandLandmarks) {
+                        currentHands = results.multiHandLandmarks.length;
+                        setHandCount(currentHands);
+
+                        for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                            const landmarks = results.multiHandLandmarks[i];
+                            
+                            // Draw skeleton with mirrored coordinates (since ctx is already mirrored)
+                            drawHandSkeleton(ctx, landmarks, w, h);
+
+                            // Recognize gesture using original landmarks
+                            const gesture = recognizeISLGesture(landmarks);
+                            if (gesture !== '?' && gesture !== bestGesture) {
+                                bestGesture = gesture;
+                            }
+                        }
+                    }
+
+                    ctx.restore();
+
+                    // Gesture logic (outside save/restore)
+                    if (bestGesture && bestGesture !== '?') {
+                        if (bestGesture === lastGestureRef.current) {
+                            gestureCountRef.current++;
+                            gestureHoldRef.current++;
+                            setCurrentGesture(bestGesture);
+                            setConfidence(Math.min(gestureHoldRef.current / 20 * 100, 100));
+                            if (gestureHoldRef.current > 15 && gestureCountRef.current > 5) {
+                                if (textBufferRef.current.length === 0 || textBufferRef.current[textBufferRef.current.length - 1] !== bestGesture) {
+                                    textBufferRef.current.push(bestGesture);
+                                    if (textBufferRef.current.length > 100) textBufferRef.current.shift();
+                                    setDetectedText(textBufferRef.current.join(' '));
+                                    gestureCountRef.current = 0;
+                                }
+                            }
+                        } else {
+                            lastGestureRef.current = bestGesture;
+                            gestureCountRef.current = 0;
+                            gestureHoldRef.current = 0;
+                            setCurrentGesture(bestGesture);
+                        }
+                    } else {
+                        gestureHoldRef.current = Math.max(0, gestureHoldRef.current - 1);
+                        setConfidence(Math.min(gestureHoldRef.current / 20 * 100, 100));
+                    }
+                });
+
+                handsRef.current = hands;
+                return () => hands.close();
+            }, []);
+
+            const startDetection = useCallback(async () => {
+                if (!videoRef.current) return;
+                setIsDetecting(true);
+                const camera = new window.Camera(videoRef.current, {
+                    onFrame: async () => {
+                        await handsRef.current.send({ image: videoRef.current });
+                    },
+                    width: 640,
+                    height: 480
+                });
+                cameraRef.current = camera;
+                await camera.start();
+            }, []);
+
+            const stopDetection = useCallback(() => {
+                if (cameraRef.current) {
+                    cameraRef.current.stop();
+                    cameraRef.current = null;
+                }
+                if (videoRef.current && videoRef.current.srcObject) {
+                    videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+                    videoRef.current.srcObject = null;
+                }
+                setIsDetecting(false);
+                setHandCount(0);
+                setConfidence(0);
+                setCurrentGesture('');
+            }, []);
+
+            const clearText = () => {
+                textBufferRef.current = [];
+                setDetectedText('');
+                lastGestureRef.current = '';
+                gestureCountRef.current = 0;
+                gestureHoldRef.current = 0;
+                setCurrentGesture('');
+                setConfidence(0);
+            };
+
+            const speakText = () => {
+                if (!detectedText) return;
+                const utterance = new SpeechSynthesisUtterance(detectedText);
+                utterance.rate = 0.9;
+                utterance.pitch = 1;
+                window.speechSynthesis.speak(utterance);
+            };
+
+            return (
+                <div className="min-h-screen bg-black text-white p-4 md:p-6">
+                    <div className="flex items-center justify-between mb-6 max-w-7xl mx-auto">
+                        <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 rounded-full liquid-glass flex items-center justify-center">
+                                <span className="font-heading italic text-white text-xl lowercase">i</span>
+                            </div>
+                            <div>
+                                <h1 className="font-heading italic text-2xl leading-none">Indian Sign Language</h1>
+                                <p className="text-xs text-white/50 font-body">Translation Dashboard</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <div className="liquid-glass rounded-full px-4 py-2 flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${isDetecting ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`} />
+                                <span className="text-xs font-body">{isDetecting ? 'Live' : 'Offline'}</span>
+                            </div>
+                            <button onClick={onLogout} className="liquid-glass rounded-full p-2.5 hover:bg-white/10 transition-colors">
+                                <LogoutIcon className="h-4 w-4" />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 max-w-7xl mx-auto">
+                        <div className="lg:col-span-2 space-y-4">
+                            <div className="liquid-glass rounded-[1.25rem] p-1 relative aspect-video overflow-hidden">
+                                <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover rounded-[1.1rem] opacity-0" playsInline />
+                                <canvas 
+                                    ref={canvasRef} 
+                                    className="w-full h-full rounded-[1.1rem] bg-black/50" 
+                                />
+                                {!isDetecting && (
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                        <CameraIcon className="h-12 w-12 text-white/30 mb-4" />
+                                        <p className="text-white/50 text-sm font-body">Camera offline — click Start Detection</p>
+                                    </div>
+                                )}
+                                {isDetecting && (
+                                    <div className="absolute top-3 left-3 liquid-glass rounded-full px-3 py-1.5 flex items-center gap-2">
+                                        <HandIcon className="h-4 w-4 text-white/80" />
+                                        <span className="text-xs font-body">{handCount} hand{handCount !== 1 ? 's' : ''}</span>
+                                    </div>
+                                )}
+                                {currentGesture && isDetecting && (
+                                    <div className="absolute bottom-3 right-3 liquid-glass-strong rounded-full px-4 py-2">
+                                        <span className="text-2xl font-heading italic text-white">{currentGesture}</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex items-center gap-3 flex-wrap">
+                                {!isDetecting ? (
+                                    <button onClick={startDetection} className="liquid-glass-strong rounded-full px-6 py-3 text-sm font-medium text-white flex items-center gap-2 hover:bg-white/10 transition-colors">
+                                        <PlayIcon className="h-4 w-4" /> Start Detection
+                                    </button>
+                                ) : (
+                                    <button onClick={stopDetection} className="liquid-glass rounded-full px-6 py-3 text-sm font-medium text-white flex items-center gap-2 hover:bg-white/10 transition-colors">
+                                        <div className="w-3 h-3 bg-white rounded-sm" /> Stop
+                                    </button>
+                                )}
+                                <button onClick={clearText} className="liquid-glass rounded-full px-4 py-3 text-sm font-medium text-white flex items-center gap-2 hover:bg-white/10 transition-colors">
+                                    <TrashIcon className="h-4 w-4" /> Clear
+                                </button>
+                                <button onClick={speakText} disabled={!detectedText} className="liquid-glass rounded-full px-4 py-3 text-sm font-medium text-white flex items-center gap-2 hover:bg-white/10 transition-colors disabled:opacity-30">
+                                    <VolumeIcon className="h-4 w-4" /> Speak
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="liquid-glass rounded-[1.25rem] p-6 min-h-[200px] flex flex-col">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="font-heading italic text-2xl">Translation</h3>
+                                    <span className="text-xs text-white/40 font-body">{detectedText.length} chars</span>
+                                </div>
+                                <div className="flex-1 bg-black/30 rounded-xl p-4 min-h-[120px]">
+                                    <p className="text-white/90 font-body text-lg leading-relaxed break-all">
+                                        {detectedText || <span className="text-white/30 italic">Sign to begin...</span>}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="liquid-glass rounded-[1.25rem] p-6">
+                                <h3 className="font-heading italic text-2xl mb-4">Live Gesture</h3>
+                                <div className="flex items-center justify-center h-24 bg-black/30 rounded-xl">
+                                    <span className="text-6xl font-heading italic text-white/90">{currentGesture || '-'}</span>
+                                </div>
+                                <div className="mt-3 flex justify-between items-center">
+                                    <span className="text-sm text-white/60 font-body">Confidence</span>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-24 h-2 bg-white/10 rounded-full overflow-hidden">
+                                            <div className="h-full bg-pink-500 rounded-full transition-all duration-300" style={{ width: `${confidence}%` }} />
+                                        </div>
+                                        <span className="text-sm font-body w-10 text-right">{Math.round(confidence)}%</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="liquid-glass rounded-[1.25rem] p-6">
+                                <h3 className="font-heading italic text-xl mb-3">Quick Guide</h3>
+                                <div className="space-y-2 text-xs text-white/60 font-body leading-relaxed">
+                                    <p>• Show both hands clearly to camera</p>
+                                    <p>• White lines = hand skeleton</p>
+                                    <p>• Pink dots = all 21 landmarks</p>
+                                    <p>• Hold sign steady for 1 second</p>
+                                    <p>• Right hand appears on right side</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Login Modal with actual validation ---
+        const LoginModal = ({ isOpen, onClose, onLogin }) => {
+            const [mode, setMode] = useState('social');
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [phone, setPhone] = useState('');
+            const [error, setError] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+
+            const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+            const validatePhone = (phone) => /^[0-9]{10}$/.test(phone.replace(/\D/g, ''));
+
+            const handleGoogleLogin = () => {
+                setIsLoading(true);
+                setError('');
+                setTimeout(() => {
+                    setIsLoading(false);
+                    onLogin();
+                }, 1500);
+            };
+
+            const handleEmailLogin = () => {
+                setError('');
+                if (!email.trim()) {
+                    setError('Please enter your email');
+                    return;
+                }
+                if (!validateEmail(email)) {
+                    setError('Please enter a valid email address');
+                    return;
+                }
+                if (!password.trim()) {
+                    setError('Please enter your password');
+                    return;
+                }
+                if (password.length < 6) {
+                    setError('Password must be at least 6 characters');
+                    return;
+                }
+                setIsLoading(true);
+                setTimeout(() => {
+                    setIsLoading(false);
+                    onLogin();
+                }, 1000);
+            };
+
+            const handlePhoneLogin = () => {
+                setError('');
+                if (!phone.trim()) {
+                    setError('Please enter your phone number');
+                    return;
+                }
+                if (!validatePhone(phone)) {
+                    setError('Please enter a valid 10-digit phone number');
+                    return;
+                }
+                setIsLoading(true);
+                setTimeout(() => {
+                    setIsLoading(false);
+                    onLogin();
+                }, 1000);
+            };
+
+            const resetForm = () => {
+                setEmail('');
+                setPassword('');
+                setPhone('');
+                setError('');
+                setIsLoading(false);
+            };
+
+            useEffect(() => {
+                if (!isOpen) resetForm();
+            }, [isOpen]);
+
+            if (!isOpen) return null;
+
+            return (
+                <AnimatePresence>
+                    <motion.div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
+                        <motion.div className="liquid-glass-strong rounded-[2rem] p-8 w-full max-w-md flex flex-col items-center text-white relative"
+                            initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                            transition={{ duration: 0.3, ease: 'easeOut' }} onClick={(e) => e.stopPropagation()}>
+                            <button onClick={onClose} className="absolute top-6 right-6 text-white/70 hover:text-white transition-colors">
+                                <CloseIcon className="h-6 w-6" />
+                            </button>
+                            <div className="w-14 h-14 rounded-full liquid-glass flex items-center justify-center mb-6">
+                                <span className="font-heading italic text-white text-2xl lowercase">i</span>
+                            </div>
+                            <h2 className="font-heading italic text-4xl mb-2">Welcome</h2>
+                            <p className="text-sm text-white/70 font-body mb-6 text-center">Log in to access real-time ISL translation</p>
+                            
+                            {error && (
+                                <div className="w-full mb-4 bg-red-500/20 border border-red-500/30 rounded-xl px-4 py-2 text-sm text-red-200 text-center">
+                                    {error}
+                                </div>
+                            )}
+
+                            {mode === 'social' ? (
+                                <div className="w-full space-y-3">
+                                    <button 
+                                        onClick={handleGoogleLogin} 
+                                        disabled={isLoading}
+                                        className="w-full bg-white text-black rounded-full py-3 px-5 flex items-center justify-center gap-3 font-medium text-sm hover:bg-white/90 transition-colors disabled:opacity-50"
+                                    >
+                                        {isLoading ? (
+                                            <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                                        ) : (
+                                            <GoogleIcon />
+                                        )}
+                                        {isLoading ? 'Connecting...' : 'Continue with Google'}
+                                    </button>
+                                    <button 
+                                        onClick={() => { setMode('email'); setError(''); }}
+                                        className="w-full liquid-glass rounded-full py-3 px-5 flex items-center justify-center gap-3 font-medium text-sm text-white hover:bg-white/10 transition-colors"
+                                    >
+                                        <MailIcon /> Continue with Email
+                                    </button>
+                                    <button 
+                                        onClick={() => { setMode('phone'); setError(''); }}
+                                        className="w-full liquid-glass rounded-full py-3 px-5 flex items-center justify-center gap-3 font-medium text-sm text-white hover:bg-white/10 transition-colors"
+                                    >
+                                        <PhoneIcon /> Continue with Phone
+                                    </button>
+                                </div>
+                            ) : mode === 'email' ? (
+                                <div className="w-full space-y-4">
+                                    <div>
+                                        <label className="text-xs text-white/60 mb-1 block">Email</label>
+                                        <input 
+                                            type="email" 
+                                            value={email}
+                                            onChange={(e) => setEmail(e.target.value)}
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-white/30 transition-colors" 
+                                            placeholder="you@example.com" 
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-white/60 mb-1 block">Password</label>
+                                        <input 
+                                            type="password" 
+                                            value={password}
+                                            onChange={(e) => setPassword(e.target.value)}
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-white/30 transition-colors" 
+                                            placeholder="••••••••" 
+                                        />
+                                    </div>
+                                    <button 
+                                        onClick={handleEmailLogin}
+                                        disabled={isLoading}
+                                        className="w-full bg-white text-black rounded-full py-3 px-5 font-medium text-sm hover:bg-white/90 transition-colors mt-2 disabled:opacity-50 flex items-center justify-center gap-2"
+                                    >
+                                        {isLoading && <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />}
+                                        {isLoading ? 'Signing in...' : 'Sign In'}
+                                    </button>
+                                    <button 
+                                        onClick={() => { setMode('social'); resetForm(); }}
+                                        className="w-full text-center text-xs text-white/50 hover:text-white/80 transition-colors"
+                                    >
+                                        ← Back to login options
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="w-full space-y-4">
+                                    <div>
+                                        <label className="text-xs text-white/60 mb-1 block">Phone Number</label>
+                                        <input 
+                                            type="tel" 
+                                            value={phone}
+                                            onChange={(e) => setPhone(e.target.value)}
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-white/30 transition-colors" 
+                                            placeholder="9876543210" 
+                                        />
+                                    </div>
+                                    <button 
+                                        onClick={handlePhoneLogin}
+                                        disabled={isLoading}
+                                        className="w-full bg-white text-black rounded-full py-3 px-5 font-medium text-sm hover:bg-white/90 transition-colors mt-2 disabled:opacity-50 flex items-center justify-center gap-2"
+                                    >
+                                        {isLoading && <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />}
+                                        {isLoading ? 'Sending OTP...' : 'Send OTP'}
+                                    </button>
+                                    <button 
+                                        onClick={() => { setMode('social'); resetForm(); }}
+                                        className="w-full text-center text-xs text-white/50 hover:text-white/80 transition-colors"
+                                    >
+                                        ← Back to login options
+                                    </button>
+                                </div>
+                            )}
+                            <p className="text-xs text-white/50 mt-6 text-center">By continuing, you agree to our Terms of Service and Privacy Policy.</p>
+                        </motion.div>
+                    </motion.div>
+                </AnimatePresence>
+            );
+        };
+
+        // --- Navbar ---
+        const Navbar = () => (
+            <nav className="fixed top-4 left-0 right-0 px-8 lg:px-16 z-50 flex items-center justify-between">
+                <div className="w-12 h-12 rounded-full liquid-glass flex items-center justify-center">
+                    <span className="font-heading italic text-white text-xl lowercase">i</span>
+                </div>
+                <div className="hidden md:flex items-center liquid-glass rounded-full px-1.5 py-1.5">
+                    <div className="flex items-center">
+                        {['Home', 'Technology', 'ISL Dictionary', 'About Us', 'Dashboard'].map(link => (
+                            <a key={link} href="#" className="px-3 py-2 text-sm font-medium text-white/90 font-body hover:text-white transition-colors">{link}</a>
+                        ))}
+                    </div>
+                </div>
+
+            </nav>
+        );
+
+        // --- Hero Section ---
+        const HeroSection = ({ onLoginClick }) => {
+            const fadeIn = (delay) => ({
+                initial: { filter: 'blur(10px)', opacity: 0, y: 20 },
+                animate: { filter: 'blur(0px)', opacity: 1, y: 0 },
+                transition: { duration: 0.8, ease: 'easeOut', delay }
+            });
+            return (
+                <section className="relative h-screen w-full overflow-hidden bg-black">
+                    <FadingVideo src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260418_080021_d598092b-c4c2-4e53-8e46-94cf9064cd50.mp4"
+                        className="absolute left-1/2 top-0 -translate-x-1/2 object-cover object-top z-0" style={{ width: "120%", height: "120%" }} />
+                    <div className="relative z-10 flex flex-col h-screen">
+                        <Navbar />
+                        <div className="flex-1 flex flex-col items-center justify-center pt-16 px-4">
+                            <motion.div {...fadeIn(0.4)} className="liquid-glass rounded-full flex items-center gap-2 pl-1 pr-3 py-1 mb-6">
+                                <span className="bg-white text-black px-3 py-1 text-xs font-semibold rounded-full">New</span>
+                                <span className="text-sm text-white/90 font-body">Real-Time ISL Translation AI is Now Live</span>
+                            </motion.div>
+
+                            <BlurText
+                                text="Indian Sign Language"
+                                className="text-5xl md:text-6xl lg:text-[4.5rem] font-heading italic text-white leading-[0.85] max-w-2xl tracking-[-3px]"
+                            />
+
+                            <motion.p {...fadeIn(0.8)} className="mt-4 text-sm md:text-base text-white max-w-xl font-body font-light leading-relaxed text-center">
+                                Experience seamless communication with our real-time AI translation. Bridging the gap between gestures and text, bringing deep connections within reach.
+                            </motion.p>
+
+                            <motion.div {...fadeIn(1.1)} className="flex items-center gap-6 mt-8">
+                                <button 
+                                    onClick={onLoginClick}
+                                    className="liquid-glass-strong rounded-full px-6 py-3 text-base font-medium text-white flex items-center gap-2"
+                                >
+                                    Start Translating <ArrowUpRight className="h-5 w-5" />
+                                </button>
+                            </motion.div>
+                        </div>
+                        <div className="pb-8"></div>
+                    </div>
+                </section>
+            );
+        };
+
+        // --- Capabilities Section ---
+        const CapabilitiesSection = () => {
+            const fadeIn = (delay) => ({
+                initial: { filter: 'blur(10px)', opacity: 0, y: 20 },
+                animate: { filter: 'blur(0px)', opacity: 1, y: 0 },
+                transition: { duration: 0.8, ease: 'easeOut', delay }
+            });
+            const cards = [
+                { icon: <ImageIcon />, tags: ['MediaPipe', 'Webcam', '21 Landmarks', 'Low Latency'], title: 'Real-Time Tracking', body: 'Our advanced model captures 21 hand landmarks per frame using just your webcam, ensuring precise gesture recognition without specialized hardware.' },
+                { icon: <MovieIcon />, tags: ['A-Z Mapping', 'Static Gestures', 'High Accuracy', 'Interactive'], title: 'ISL Alphabet AI', body: 'Master the Indian Sign Language alphabet with our interactive AI. Instant feedback helps you learn and correct hand shapes efficiently.' },
+                { icon: <LightbulbIcon />, tags: ['NLP Powered', 'Word Combo', 'Context Aware', 'Text-to-Speech'], title: 'Sentence Builder', body: 'Translate continuous signs into readable text and spoken audio. Our NLP engine constructs grammatically correct sentences from your gestures.' }
+            ];
+            return (
+                <section className="relative min-h-screen w-full overflow-hidden bg-black flex flex-col">
+                    <FadingVideo src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260418_094631_d30ab262-45ee-4b7d-99f3-5d5848c8ef13.mp4"
+                        className="absolute inset-0 w-full h-full object-cover z-0" />
+                    <div className="relative z-10 px-8 md:px-16 lg:px-20 pt-24 pb-10 flex flex-col min-h-screen">
+                        <div className="mb-auto">
+                            <motion.div {...fadeIn(0.2)} className="text-sm font-body text-white/80 mb-6">// Core Features</motion.div>
+                            <motion.h2 {...fadeIn(0.4)} className="font-heading italic text-white text-5xl md:text-6xl lg:text-[5rem] leading-[0.9] tracking-[-2px]">Communication<br/>Redefined</motion.h2>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-16">
+                            {cards.map((card, i) => (
+                                <motion.div key={card.title} {...fadeIn(0.6 + i * 0.15)} className="liquid-glass rounded-[1.25rem] p-6 min-h-[360px] flex flex-col">
+                                    <div className="flex items-start justify-between gap-4">
+                                        <div className="w-11 h-11 rounded-[0.75rem] liquid-glass flex items-center justify-center">{card.icon}</div>
+                                        <div className="flex flex-wrap justify-end gap-1.5 max-w-[70%]">
+                                            {card.tags.map(tag => <span key={tag} className="liquid-glass rounded-full px-3 py-1 text-[11px] text-white/90 font-body whitespace-nowrap">{tag}</span>)}
+                                        </div>
+                                    </div>
+                                    <div className="flex-1"></div>
+                                    <div className="mt-6">
+                                        <h3 className="font-heading italic text-white text-3xl md:text-4xl tracking-[-1px] leading-none">{card.title}</h3>
+                                        <p className="mt-3 text-sm text-white/90 font-body font-light leading-snug max-w-[32ch]">{card.body}</p>
+                                    </div>
+                                </motion.div>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+            );
+        };
+
+        // --- Main App ---
+        const App = () => {
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [isLoginOpen, setIsLoginOpen] = useState(false);
+            const handleLogin = () => { setIsLoggedIn(true); setIsLoginOpen(false); };
+            const handleLogout = () => { setIsLoggedIn(false); };
+            return (
+                <div className="relative">
+                    {!isLoggedIn ? (
+                        <>
+                            <HeroSection onLoginClick={() => setIsLoginOpen(true)} />
+                            <CapabilitiesSection />
+                            <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} onLogin={handleLogin} />
+                        </>
+                    ) : (
+                        <ISLDashboard onLogout={handleLogout} />
+                    )}
+                </div>
+                );
+        };
+
+        window.App = App;
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
